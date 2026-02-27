@@ -55,44 +55,59 @@ def split_audio_fixed(audio_path: str, segment_sec=30) -> list:
     return chunks
 
 # ---------------- TRANSCRIBE AUDIO ----------------
+model = whisper.load_model("small")  # cloud-safe model
+
+
+def ffmpeg_available() -> bool:
+    try:
+        subprocess.run(
+            ["ffmpeg", "-version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        return True
+    except Exception:
+        return False
+
+
 def transcribe_audio(audio_path: str) -> str:
-    full_text = []
+    """
+    Cloud-safe transcription:
+    - Uses ffmpeg splitting locally if available
+    - Falls back to direct Whisper transcription on cloud
+    """
 
-    audio_chunks = split_audio_fixed(audio_path)
+    # ✅ CLOUD FALLBACK (no ffmpeg)
+    if not ffmpeg_available():
+        result = model.transcribe(
+            audio_path,
+            language="en",
+            fp16=False,
+            temperature=0.0
+        )
+        return result.get("text", "").strip()
 
-    if not audio_chunks:
+    # ✅ LOCAL MODE (ffmpeg available)
+    try:
+        audio_chunks = split_audio_fixed(audio_path)
+    except Exception:
         audio_chunks = [audio_path]
 
+    full_text = []
+
     for chunk in audio_chunks:
-        try:
-            # Skip tiny chunks
-            if os.path.getsize(chunk) < 50_000:
-                continue
+        result = model.transcribe(
+            chunk,
+            language="en",
+            fp16=False,
+            temperature=0.0
+        )
+        text = result.get("text", "").strip()
+        if text:
+            full_text.append(text)
 
-            result = model.transcribe(
-                chunk,
-                language="en",
-                fp16=False,
-                temperature=0.0,
-                condition_on_previous_text=True,
-                no_speech_threshold=0.4,
-                compression_ratio_threshold=2.4,
-                initial_prompt=(
-                    "This is a continuous English lecture. "
-                    "Transcribe all spoken content accurately."
-                )
-            )
-
-            text = result.get("text", "").strip()
-            if text:
-                full_text.append(text)
-
-        except RuntimeError as e:
-            print(f"[WARN] Skipping chunk {chunk}: {e}")
-
-        finally:
-            if chunk != audio_path and os.path.exists(chunk):
-                os.remove(chunk)
+        if chunk != audio_path and os.path.exists(chunk):
+            os.remove(chunk)
 
     return " ".join(full_text)
 
