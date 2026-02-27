@@ -55,7 +55,7 @@ def split_audio_fixed(audio_path: str, segment_sec=30) -> list:
     return chunks
 
 # ---------------- TRANSCRIBE AUDIO ----------------
-model = whisper.load_model("small")  # cloud-safe model
+ # cloud-safe model
 
 
 def ffmpeg_available() -> bool:
